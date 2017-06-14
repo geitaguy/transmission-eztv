@@ -1,0 +1,79 @@
+#!/bin/bash
+
+url="https://eztv.ag"
+user="geitaguy"
+pass="ashantigeita"
+path="/usr/local/var/eztv"
+cookie="$path/cookies.txt"
+host="localhost"
+port="9092"
+
+login_cookie() {
+  wget -nv --save-cookies $cookie --post-data "loginname=$user&password=$pass" $url/login/ -O /dev/null
+}
+
+get_shows() {
+  wget -nv --load-cookies $cookie $url/myshows/ -nH -k -O $path/myshows.html
+}
+
+add_magnets() {
+  magnetlist=`cat $path/myshows.html | grep 720p | grep magnet | cut -f 2 -d '"'`
+  for magnet in $magnetlist
+    do
+      echo "transmission-remote $host:$port --add \"$magnet\""
+      transmission-remote $host:$port --add "$magnet"
+    done
+}
+
+remove_complete() {
+  torrentids=`transmission-remote $host:$port --list | grep 100% | cut -c 1-4`
+  for id in $torrentids
+    do
+      echo "transmission-remote $host:$port --torrent $id --remove"
+      transmission-remote $host:$port --torrent $id --remove
+    done
+}
+
+mark_watched() {
+  wget -nv --load-cookies $cookie $url/myshows/watched/all/ -O /dev/null
+  rm $path/myshows.html
+}
+
+add_auto() {
+  if [[ -f ~/Library/LaunchAgents/eztv.plist ]]; then
+    rm ~/Library/LaunchAgents/eztv.plist
+  fi
+  echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+	<key>Label</key>
+	<string>net.geitaguy.eztv</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/usr/local/bin/eztv.sh</string>
+		</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>600</integer>
+</dict>
+</plist>" > ~/Library/LaunchAgents/eztv.plist
+  launchctl load ~/Library/LaunchAgents/eztv.plist
+}
+
+if [[ $1 ]]; then
+  $1
+else
+  if [[ ! -d $path ]];then
+    mkdir -p $path
+  fi
+  if [[ ! -f $cookie ]]; then
+    login_cookie
+  fi
+  get_shows
+  add_magnets
+  mark_watched
+  remove_complete
+fi
