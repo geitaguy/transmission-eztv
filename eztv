@@ -157,29 +157,6 @@ markwatched() {
   esac
 }
 
-add_auto() {
-  if [[ -f ~/Library/LaunchAgents/eztv.plist ]]; then
-    rm ~/Library/LaunchAgents/eztv.plist
-  fi
-  echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-  <!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-  <plist version=\"1.0\">
-  <dict>
-  <key>Label</key>
-  <string>net.geitaguy.eztv</string>
-  <key>ProgramArguments</key>
-  <array>
-  <string>/bin/bash</string>
-  <string>/usr/local/bin/eztv.sh</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>600</integer>
-  </dict>
-  </plist>" > ~/Library/LaunchAgents/eztv.plist
-  launchctl load ~/Library/LaunchAgents/eztv.plist
-}
 runall() {
   if [[ ! -d $workdir ]];then
     mkdir -p $workdir
