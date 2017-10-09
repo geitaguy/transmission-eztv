@@ -1,43 +1,160 @@
 #!/bin/bash
 
-# Config
-url="https://eztv.ag"
-user=""
-pass=""
-path="/usr/local/var/eztv"
-cookie="$path/cookies.txt"
-host="localhost"
-port="9092"
+workdir="/usr/local/var/eztv"
+conf=${workdir}/eztv.conf
+cookie="${workdir}/eztv.txt"
 
-login_cookie() {
-  wget -nv --save-cookies $cookie --post-data "loginname=$user&password=$pass" $url/login/ -O /dev/null
+echo "${dns}"
+error() {
+  case $1 in
+    get)
+    echo "Error: curl/wget not found in PATH"
+    echo "Install curl via Homebrew:"
+    echo
+    echo "  brew install curl --with-c-ares"
+    exit 1
+    ;;
+    dns)
+    echo "Error: DNS settings not valid"
+    echo "Change DNS server to:"
+    echo
+    echo "  Google: 8.8.8.8"
+    exit 1
+    ;;
+  esac
 }
 
-get_shows() {
-  wget -nv --load-cookies $cookie $url/myshows/ -nH -k -O $path/myshows.html
+if [[ `/usr/local/opt/curl/bin/curl -V | grep c-ares` ]]; then
+  get="curl-c-ares"
+  curl="/usr/local/opt/curl/bin/curl"
+elif [[ `which wget` ]]; then
+  get="wget"
+  wget=`which wget`
+elif [[ `which curl` ]]; then
+  get="curl"
+  curl=`which curl`
+else
+  error get
+fi
+
+case $get in
+  wget|curl)
+  if [[ ! `cat /etc/resolv.conf | grep ${dns}` ]]; then
+    error dns
+  fi
+  ;;
+esac
+
+if [[ -f $conf ]]; then
+  source $conf
+else
+  configure
+fi
+
+showconfig() {
+  if [[ $verbose = "true" ]]; then
+    echo "Renderer: ${get}"
+    echo "DNS Server: ${dns}"
+    echo
+    echo "Config:"
+    cat ${conf}
+    echo
+  fi
 }
 
-add_magnets() {
-  magnetlist=`cat $path/myshows.html | grep 720p | grep magnet | cut -f 2 -d '"'`
-  for magnet in $magnetlist
+newshows="0"
+
+configure() {
+  case $1 in
+    url) read -p "Enter new eztv domain:" url
+    sed 's_//'
+    shift ;;
+  esac
+  read -p "Enter eztv username:" user
+  read -p "Enter eztv password:" pass
+  read -p "Enter Transmission host IP/domain:" host
+  read -p "Enter Transmission host port:" port
+  echo "user=$user" >> $conf
+  echo "pass=`echo $pass | base64`" >> $conf
+  echo "host=$host" >> $conf
+  echo "port=$port" >> $conf
+  echo "dns=8.8.8.8" >> $conf
+}
+
+login() {
+  case $get in
+    curl-c-ares)
+    ${curl} --dns-servers ${dns} --silent --cookie-jar ${cookie} --data "loginname=$user&password=$pass" $url/login/ -o /dev/null
+    ;;
+    curl)
+    ${curl} --silent --cookie-jar - --data "loginname=$user&password=$pass" $url/login/ -o /dev/null
+    ;;
+
+    wget)
+    ${wget} -q --save-cookies $cookie --post-data "loginname=$user&password=$pass" $url/login/ -O /dev/null
+    ;;
+  esac
+
+}
+
+getshows() {
+  echo -n "Retrieving new episodes..."
+  case $get in
+    curl-c-ares)
+    ${curl} --dns-servers ${dns} --silent --cookie ${cookie} ${url}/myshows/ -o ${workdir}/myshows.html
+    ;;
+    curl)
+    ${curl} --silent --cookie ${cookie} ${url}/myshows/ -o ${workdir}/myshows.html
+    ;;
+    wget)
+    ${wget} -q --load-cookies $cookie $url/myshows/ -O $workdir/myshows.html
+    ;;
+  esac
+}
+
+addshows() {
+  magnetlist=`cat $workdir/myshows.html | grep 720p | grep magnet | cut -f 2 -d '"'`
+  if [[ $magnetlist = "" ]]
+  then
+    echo "No new episodes"
+  else
+    newshows="1"
+    echo "New episodes available:"
+    for magnet in $magnetlist
     do
-      echo "transmission-remote $host:$port --add \"$magnet\""
-      transmission-remote $host:$port --add "$magnet"
+      echo -n "`echo $magnet | sed 's/dn=/#/;s/720p/#/;s/\%20/\ /g;s/\./\ /g' | cut -f 2 -d "#"`"
+      echo "...`transmission-remote $host:$port --add \"$magnet\" | cut -f 2 -d '\"'`"
     done
+  fi
 }
 
-remove_complete() {
-  torrentids=`transmission-remote $host:$port --list | grep 100% | cut -c 1-4`
-  for id in $torrentids
+removeshows() {
+  torrentlist=`transmission-remote $host:$port --list | grep 100% | cut -c 1-4`
+  if [[ ! $torrentlist = "" ]]
+  then
+    echo
+    echo "Removing completed torrents:"
+    for torrent in $torrentlist
     do
-      echo "transmission-remote $host:$port --torrent $id --remove"
-      transmission-remote $host:$port --torrent $id --remove
+      echo -n "`transmission-remote 127.0.0.1:9092 --torrent $torrent --info | grep Name | sed 's/: /#/;s/.720p/#/;s/\./\ /g'|cut -f 2 -d '#'`"
+      echo "...`transmission-remote $host:$port --torrent $torrent --remove | cut -f 2 -d '\"'`"
     done
+  fi
 }
 
-mark_watched() {
-  wget -nv --load-cookies $cookie $url/myshows/watched/all/ -O /dev/null
-  rm $path/myshows.html
+markwatched() {
+  case $get in
+    curl-c-ares)
+    ${curl} --dns-servers ${dns} --silent --cookie ${cookie} ${url}/myshows/watched/all/ -o /dev/null
+    ;;
+    curl)
+    ${curl} --silent --cookie ${cookie} ${url}/myshows/watched/all -o /dev/null
+    ;;
+    wget)
+    ${wget} -q --load-cookies $cookie $url/myshows/watched/all/ -O /dev/null
+    rm $workdir/myshows.html
+    ;;
+  esac
 }
 
 add_auto() {
@@ -45,36 +162,61 @@ add_auto() {
     rm ~/Library/LaunchAgents/eztv.plist
   fi
   echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-<plist version=\"1.0\">
-<dict>
-	<key>Label</key>
-	<string>net.geitaguy.eztv</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>/bin/bash</string>
-		<string>/usr/local/bin/eztv.sh</string>
-		</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>StartInterval</key>
-	<integer>600</integer>
-</dict>
-</plist>" > ~/Library/LaunchAgents/eztv.plist
+  <!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+  <plist version=\"1.0\">
+  <dict>
+  <key>Label</key>
+  <string>net.geitaguy.eztv</string>
+  <key>ProgramArguments</key>
+  <array>
+  <string>/bin/bash</string>
+  <string>/usr/local/bin/eztv.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  </dict>
+  </plist>" > ~/Library/LaunchAgents/eztv.plist
   launchctl load ~/Library/LaunchAgents/eztv.plist
+}
+runall() {
+  if [[ ! -d $workdir ]];then
+    mkdir -p $workdir
+  fi
+  if [[ ! -f $cookie ]]; then
+    login
+  fi
+  getshows
+  addshows
+  markwatched
+  removeshows
+}
+
+usage () {
+  echo "Usage: $9"
 }
 
 if [[ $1 ]]; then
-  $1
+  case $1 in
+    test)
+    shift
+    ;;
+    -v | --verbose)
+    verbose="true"
+    showconfig
+    runall
+    shift
+    ;;
+    getshows | addshows | markwatched | removeshows | configure)
+    $1
+    shift
+    ;;
+    *)
+      usage
+      exit 1
+    ;;
+  esac
 else
-  if [[ ! -d $path ]];then
-    mkdir -p $path
-  fi
-  if [[ ! -f $cookie ]]; then
-    login_cookie
-  fi
-  get_shows
-  add_magnets
-  mark_watched
-  remove_complete
+  runall
 fi
