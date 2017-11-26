@@ -123,7 +123,11 @@ addshows() {
     for magnet in $magnetlist
     do
       echo -n "`echo $magnet | sed 's/dn=/#/;s/720p/#/;s/\%20/\ /g;s/\./\ /g' | cut -f 2 -d "#"`"
-      echo "...`transmission-remote $host:$port --add \"$magnet\" | cut -f 2 -d '\"'`"
+      if [[ `echo $magnet | grep -e iNTERNAL -e INTERNAL` ]]; then
+        echo "...SKIPPED"
+      else
+        echo "...`transmission-remote $host:$port --add \"$magnet\" | cut -f 2 -d '\"'`"
+      fi
     done
   fi
 }
